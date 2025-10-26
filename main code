@@ -1,0 +1,89 @@
+# app.py
+import os
+import random
+import arxiv
+import openai
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+from flask import Flask, request, jsonify
+
+# Flaskアプリを作成
+app = Flask(__name__)
+
+# 環境変数からキーを読み取る（RenderのDashboardで設定）
+openai.api_key = os.environ.get("OPENAI_API_KEY")
+SLACK_API_TOKEN = os.environ.get("SLACK_API_TOKEN")
+SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "#general")
+
+# Slackクライアント
+client = WebClient(token=SLACK_API_TOKEN)
+
+
+def get_summary(result):
+    """論文情報を要約し、日本語フォーマットで返す"""
+    system = """与えられた論文の要点を3点のみでまとめ、以下のフォーマットで日本語で出力してください。```
+    タイトルの日本語訳
+    ・要点1
+    ・要点2
+    ・要点3
+    ```"""
+
+    text = f"title: {result.title}\nbody: {result.summary}"
+
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': text}
+        ],
+        temperature=0.25,
+    )
+
+    summary = response['choices'][0]['message']['content']
+    title_en = result.title
+    title, *body = summary.split('\n')
+    body = '\n'.join(body)
+    date_str = result.published.strftime("%Y-%m-%d %H:%M:%S")
+    message = f"発行日: {date_str}\n{result.entry_id}\n{title_en}\n{title}\n{body}\n"
+
+    return message
+
+
+@app.route("/", methods=["GET", "POST"])
+def send_papers():
+    """Renderで呼び出すメイン関数（HTTPトリガー）"""
+    try:
+        # 検索クエリ設定
+        query = 'ti:"Deep Learning"'
+        search = arxiv.Search(
+            query=query,
+            max_results=100,
+            sort_by=arxiv.SortCriterion.SubmittedDate,
+            sort_order=arxiv.SortOrder.Descending,
+        )
+
+        # ランダムに3本選ぶ
+        result_list = list(search.results())
+        results = random.sample(result_list, k=3)
+
+        # Slackへ投稿
+        for i, result in enumerate(results):
+            message = f"今日の論文です！ {i+1}本目\n" + get_summary(result)
+            response = client.chat_postMessage(
+                channel=SLACK_CHANNEL,
+                text=message
+            )
+            print(f"Message posted: {response['ts']}")
+
+        return jsonify({"status": "success", "message": "投稿完了！"}), 200
+
+    except SlackApiError as e:
+        print(f"Slack API error: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+    except Exception as e:
+        print(f"General error: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
