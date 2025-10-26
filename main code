@@ -13,7 +13,7 @@ app = Flask(__name__)
 # 環境変数からキーを読み取る（RenderのDashboardで設定）
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 SLACK_API_TOKEN = os.environ.get("SLACK_API_TOKEN")
-SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "#general")
+SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "#定期論文要約")
 
 # Slackクライアント
 client = WebClient(token=SLACK_API_TOKEN)
